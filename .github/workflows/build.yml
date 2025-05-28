@@ -58,7 +58,6 @@ jobs:
       - uses: docker/build-push-action@v6
         with:
           context: httpd
-          file: httpd/Dockerfile-static
           push: true
           tags: |
             ghcr.io/beryju/oidc-conformance-suite-httpd:v5.1.32
