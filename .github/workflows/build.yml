@@ -38,11 +38,11 @@ jobs:
           context: .
           push: true
           tags: |
-            ghcr.io/beryju/oidc-conformance-suite-server:v5.1.32
+            ghcr.io/beryju/oidc-conformance-suite-server:v5.1.41
           platforms: linux/amd64,linux/arm64
           cache-from: type=gha
           cache-to: type=gha,mode=max
-  build-httpd:
+  build-nginx:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -57,10 +57,10 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - uses: docker/build-push-action@v6
         with:
-          context: httpd
+          context: nginx
           push: true
           tags: |
-            ghcr.io/beryju/oidc-conformance-suite-httpd:v5.1.32
+            ghcr.io/beryju/oidc-conformance-suite-nginx:v5.1.41
           platforms: linux/amd64,linux/arm64
           cache-from: type=gha
           cache-to: type=gha,mode=max
