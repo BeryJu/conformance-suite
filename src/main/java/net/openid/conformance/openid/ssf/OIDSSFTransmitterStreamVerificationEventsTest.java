@@ -117,7 +117,7 @@ public class OIDSSFTransmitterStreamVerificationEventsTest extends AbstractOIDSS
 
 				eventLog.runBlock("Verify verification event received via PUSH delivery mode", () -> {
 
-					lookupNextPushRequest();
+					lookupPushRequestMatchingVerificationState();
 
 					// use current push request or wait for it
 					callAndStopOnFailure(OIDSSFGetOrWaitForPushRequest.class, "OIDSSF-8.1.4.1");
