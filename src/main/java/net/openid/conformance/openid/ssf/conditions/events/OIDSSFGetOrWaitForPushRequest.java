@@ -5,14 +5,11 @@ import com.google.gson.JsonObject;
 import net.openid.conformance.condition.AbstractCondition;
 import net.openid.conformance.testmodule.Environment;
 
-import java.util.concurrent.TimeUnit;
-
 public class OIDSSFGetOrWaitForPushRequest extends AbstractCondition {
 
 	@Override
 	public Environment evaluate(Environment env) {
-
-		JsonObject pushRequestObject = waitForPushRequestObject(env);
+		JsonObject pushRequestObject = getPushRequestObject(env);
 		if (pushRequestObject == null) {
 			throw error("Did not receive push request");
 		}
@@ -22,35 +19,12 @@ public class OIDSSFGetOrWaitForPushRequest extends AbstractCondition {
 		return env;
 	}
 
-	protected JsonObject waitForPushRequestObject(Environment env) {
-
-		JsonObject pushRequestObject;
-		for (int i = 0; i < 5; i++) {
-			JsonElement elementFromObject = env.getElementFromObject("ssf", "push_request");
-
-			if (elementFromObject != null) {
-				pushRequestObject = elementFromObject.getAsJsonObject();
-				if (pushRequestObject != null) {
-					log("Found push request object");
-					return pushRequestObject;
-				}
-			}
-			log("Waiting for push request object");
-			waitSeconds(5);
+	protected JsonObject getPushRequestObject(Environment env) {
+		JsonElement elementFromObject = env.getElementFromObject("ssf", "push_request");
+		if (elementFromObject == null || !elementFromObject.isJsonObject()) {
+			return null;
 		}
 
-		return null;
-	}
-
-	protected void waitSeconds(int expectedWaitSeconds) {
-		logSuccess("Pausing for " + expectedWaitSeconds + " seconds");
-
-		try {
-			TimeUnit.SECONDS.sleep(expectedWaitSeconds);
-		} catch (InterruptedException e) {
-			throw new RuntimeException(e);
-		}
-
-		logSuccess("Woke up after " + expectedWaitSeconds + " seconds sleep");
+		return elementFromObject.getAsJsonObject();
 	}
 }

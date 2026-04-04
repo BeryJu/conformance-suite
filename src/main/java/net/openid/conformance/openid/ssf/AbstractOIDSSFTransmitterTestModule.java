@@ -1,5 +1,6 @@
 package net.openid.conformance.openid.ssf;
 
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -36,11 +37,13 @@ import net.openid.conformance.openid.ssf.conditions.streams.OIDSSFDeleteStreamCo
 import net.openid.conformance.openid.ssf.conditions.streams.OIDSSFInjectPushAuthorizationHeader;
 import net.openid.conformance.openid.ssf.conditions.streams.OIDSSFReadStreamConfigCall;
 import net.openid.conformance.openid.ssf.delivery.SSfPushRequest;
+import net.openid.conformance.testmodule.OIDFJSON;
 import net.openid.conformance.openid.ssf.variant.SsfAuthMode;
 import net.openid.conformance.openid.ssf.variant.SsfDeliveryMode;
 import net.openid.conformance.openid.ssf.variant.SsfProfile;
 import net.openid.conformance.openid.ssf.variant.SsfServerMetadata;
 import net.openid.conformance.sequence.client.CreateJWTClientAuthenticationAssertionAndAddToTokenEndpointRequest;
+import net.openid.conformance.util.JWTUtil;
 import net.openid.conformance.variant.ClientAuthType;
 import net.openid.conformance.variant.ClientRegistration;
 import net.openid.conformance.variant.ServerMetadata;
@@ -51,7 +54,11 @@ import net.openid.conformance.variant.VariantParameters;
 import org.springframework.http.ResponseEntity;
 import org.springframework.util.StringUtils;
 
+import java.text.ParseException;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.NoSuchElementException;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.BlockingDeque;
@@ -274,8 +281,8 @@ public class AbstractOIDSSFTransmitterTestModule extends AbstractOIDSSFTestModul
 
 		if ("ssf-push".equals(path)) {
 			SSfPushRequest pushRequest = new SSfPushRequest(UUID.randomUUID().toString(), path, Instant.now(), req, res, requestParts);
+			pushRequests.addLast(pushRequest);
 			eventLog.log(getName(), "Call to ssf-push endpoint with id" + pushRequest.id() + " captured and stored for later processing.");
-			pushRequests.push(pushRequest);
 
 			// Mark push request as accepted for now, and validate later
 			return ResponseEntity.accepted().build();
@@ -292,21 +299,121 @@ public class AbstractOIDSSFTransmitterTestModule extends AbstractOIDSSFTestModul
 		call(sequence(OIDSSFValidateTlsConnectionConditionSequence.class));
 	}
 
-	protected SSfPushRequest lookupNextPushRequest() {
+	protected SSfPushRequest lookupPushRequestMatchingVerificationState() {
+		String expectedState = env.getString("ssf", "verification.state");
+		clearStoredPushRequest();
+		List<String> observedStates = new ArrayList<>();
+		SSfPushRequest fallbackPushRequest = null;
+		String fallbackState = null;
 
 		try {
-			SSfPushRequest pushRequest = pushRequests.pollFirst(5, TimeUnit.SECONDS);
-			if (pushRequest == null) {
-				return pushRequest;
+			long deadlineNanos = System.nanoTime() + TimeUnit.SECONDS.toNanos(25);
+			while (true) {
+				long remainingNanos = deadlineNanos - System.nanoTime();
+				if (remainingNanos <= 0) {
+					break;
+				}
+
+				setStatus(Status.WAITING);
+				SSfPushRequest pushRequest;
+				try {
+					pushRequest = pushRequests.pollFirst(remainingNanos, TimeUnit.NANOSECONDS);
+				} finally {
+					setStatus(Status.RUNNING);
+				}
+
+				if (pushRequest == null) {
+					break;
+				}
+
+				String pushRequestState = extractVerificationEventState(pushRequest);
+				if (pushRequestState != null) {
+					observedStates.add(pushRequestState);
+				}
+
+				if (expectedState.equals(pushRequestState)) {
+					storePushRequestForValidation(pushRequest, pushRequestState, true, observedStates);
+					return pushRequest;
+				}
+
+				if (fallbackPushRequest == null) {
+					fallbackPushRequest = pushRequest;
+					fallbackState = pushRequestState;
+				}
+
+				eventLog.log(getName(), args(
+					"msg", "Skipping recorded ssf-push request while looking for verification event with matching state",
+					"push_request_id", pushRequest.id(),
+					"expected_state", expectedState,
+					"actual_state", pushRequestState
+				));
+			}
+		} catch (InterruptedException e) {
+			Thread.currentThread().interrupt();
+			throw new RuntimeException(e);
+		}
+
+		if (fallbackPushRequest != null) {
+			storePushRequestForValidation(fallbackPushRequest, fallbackState, false, observedStates);
+		}
+
+		return fallbackPushRequest;
+	}
+
+	private void clearStoredPushRequest() {
+		try {
+			env.removeElement("ssf", "push_request");
+		} catch (NoSuchElementException e) {
+			// Nothing to clear.
+		}
+	}
+
+	private void storePushRequestForValidation(SSfPushRequest pushRequest, String pushRequestState, boolean matchedExpectedState, List<String> observedStates) {
+		eventLog.log(getName(), args(
+			"msg", matchedExpectedState
+				? "Processing recorded ssf-push request with matching verification state"
+				: "Processing recorded ssf-push request without a matching verification state",
+			"push_request_id", pushRequest.id(),
+			"expected_state", env.getString("ssf", "verification.state"),
+			"actual_state", pushRequestState,
+			"observed_states", observedStates
+		));
+		env.putObject("ssf", "push_request", pushRequest.requestParts());
+		onPushDeliveryReceived(pushRequest.path(), pushRequest.requestParts());
+	}
+
+	private String extractVerificationEventState(SSfPushRequest pushRequest) {
+		try {
+			JsonElement bodyEl = pushRequest.requestParts().get("body");
+			String body = OIDFJSON.getStringOrNull(bodyEl);
+			if (body == null) {
+				return null;
 			}
 
-			eventLog.log(getName(), "Processing recorded ssf-push endpoint request with id" + pushRequest.id());
-			env.putObject("ssf", "push_request", pushRequest.requestParts());
-			onPushDeliveryReceived(pushRequest.path(), pushRequest.requestParts());
+			JsonObject token = JWTUtil.jwtStringToJsonObjectForEnvironment(body);
+			JsonObject claims = token.getAsJsonObject("claims");
+			if (claims == null) {
+				return null;
+			}
 
-			return pushRequest;
-		} catch (InterruptedException e) {
-			throw new RuntimeException(e);
+			JsonObject events = claims.getAsJsonObject("events");
+			if (events == null) {
+				return null;
+			}
+
+			JsonObject verificationEventObject = events.getAsJsonObject(SsfEvents.SSF_STREAM_VERIFICATION_EVENT_TYPE);
+			if (verificationEventObject == null) {
+				return null;
+			}
+
+			return OIDFJSON.tryGetString(verificationEventObject.get("state"));
+		} catch (ParseException | OIDFJSON.UnexpectedJsonTypeException e) {
+			eventLog.log(getName(), args(
+				"msg", "Unable to parse state from recorded ssf-push request while searching for matching verification event",
+				"push_request_id", pushRequest.id(),
+				"error", e.getMessage()
+			));
+			return null;
 		}
 	}
 }
