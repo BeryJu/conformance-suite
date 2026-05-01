@@ -20,21 +20,25 @@ public class VP1FinalWalletTestPlan implements TestPlan {
 
 	public static final List<Class<? extends TestModule>> testModules = List.of(
 		// positive tests
-		VP1FinalWalletHappyFlowNoState.class,
+		VP1FinalWalletHappyFlow.class,
 		VP1FinalWalletAlternateHappyFlow.class,
 		VP1FinalWalletRequestUriMethodPost.class,
+
+		// DCQL variation tests
+		VP1FinalWalletFewerClaimsThanAvailable.class,
+		VP1FinalWalletOptionalCredentialSet.class,
+		VP1FinalWalletNoClaimsInDcqlQuery.class,
 
 		// negative tests
 		VP1FinalWalletResponseUriNotClientId.class,
 		VP1FinalWalletInvalidRequestObjectSignature.class,
-		VP1FinalWalletMultiSignedOneInvalidSignature.class
-
-		// negative tests:
-		// try sending a redirect_uri in auth request with response_mode=direct_post
-		// sending invalid client_id_scheme should cause an error?
-		// flow without nonce
-		// different client_id in request object and passed in url query? ("The Client Identifier value in the `client_id` Authorization Request parameter and the Request Object `client_id` claim value MUST be identical, including the Client Identifier Scheme.")
-		// signed DC API request but no or wrong expected_origins
+		VP1FinalWalletMultiSignedOneInvalidSignature.class,
+		VP1FinalWalletMismatchedClientIdInRequestObject.class,
+		VP1FinalWalletRedirectUriWithDirectPost.class,
+		VP1FinalWalletMissingNonce.class,
+		VP1FinalWalletWrongExpectedOrigins.class,
+		VP1FinalWalletInvalidClientIdPrefix.class,
+		VP1FinalWalletUnknownTransactionDataType.class
 	);
 
 	@Override

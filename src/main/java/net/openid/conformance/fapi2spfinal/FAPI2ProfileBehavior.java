@@ -235,8 +235,9 @@ public class FAPI2ProfileBehavior {
 	 * Validate profile-specific signed response from the resource endpoint.
 	 * Default does nothing.
 	 */
-	public void validateResourceEndpointResponse() {
+	public ConditionSequence validateResourceEndpointResponse() {
 		// plain FAPI: no signed response validation
+		return null;
 	}
 
 	/**
@@ -376,15 +377,6 @@ public class FAPI2ProfileBehavior {
 				}
 			}
 		};
-	}
-
-	/**
-	 * Called after server configuration is fetched and before client configuration.
-	 * VCI overrides to resolve credential configuration, check encryption support, etc.
-	 */
-	public ConditionSequence afterServerConfigurationFetched() {
-		// plain FAPI: nothing extra
-		return null;
 	}
 
 	/**

@@ -51,10 +51,8 @@ import net.openid.conformance.condition.client.CreateRandomStateValue;
 import net.openid.conformance.condition.client.CreateRedirectUri;
 import net.openid.conformance.condition.client.CreateTokenEndpointRequestForAuthorizationCodeGrant;
 import net.openid.conformance.condition.client.CreateTokenEndpointRequestForClientCredentialsGrant;
-import net.openid.conformance.condition.client.EnsureContentTypeApplicationJwt;
 import net.openid.conformance.condition.client.EnsureContentTypeJson;
 import net.openid.conformance.condition.client.EnsureHttpStatusCodeIs200or201;
-import net.openid.conformance.condition.client.EnsureHttpStatusCodeIs201;
 import net.openid.conformance.condition.client.EnsureIdTokenContainsKid;
 import net.openid.conformance.condition.client.EnsureMinimumAccessTokenEntropy;
 import net.openid.conformance.condition.client.EnsureMinimumAccessTokenLength;
@@ -78,10 +76,7 @@ import net.openid.conformance.condition.client.ExtractMTLSCertificates2FromConfi
 import net.openid.conformance.condition.client.ExtractMTLSCertificatesFromConfiguration;
 import net.openid.conformance.condition.client.ExtractRequestUriFromPARResponse;
 import net.openid.conformance.condition.client.ExtractSHash;
-import net.openid.conformance.condition.client.ExtractSignedJwtFromResourceResponse;
 import net.openid.conformance.condition.client.FAPI2ValidateJarmSigningAlg;
-import net.openid.conformance.condition.client.FAPIBrazilValidateResourceResponseSigningAlg;
-import net.openid.conformance.condition.client.FAPIBrazilValidateResourceResponseTyp;
 import net.openid.conformance.condition.client.FetchServerKeys;
 import net.openid.conformance.condition.client.GenerateDpopKey;
 import net.openid.conformance.condition.client.GetStaticClient2Configuration;
@@ -112,8 +107,6 @@ import net.openid.conformance.condition.client.ValidateJARMSigningAlg;
 import net.openid.conformance.condition.client.ValidateMTLSCertificates2Header;
 import net.openid.conformance.condition.client.ValidateMTLSCertificatesAsX509;
 import net.openid.conformance.condition.client.ValidateMTLSCertificatesHeader;
-import net.openid.conformance.condition.client.ValidateResourceResponseJwtClaims;
-import net.openid.conformance.condition.client.ValidateResourceResponseSignature;
 import net.openid.conformance.condition.client.ValidateSHash;
 import net.openid.conformance.condition.client.ValidateServerJWKs;
 import net.openid.conformance.condition.client.ValidateSuccessfulAuthCodeFlowResponseFromAuthorizationEndpoint;
@@ -142,10 +135,6 @@ import net.openid.conformance.variant.FAPI2FinalOPProfile;
 import net.openid.conformance.variant.FAPI2SenderConstrainMethod;
 import net.openid.conformance.variant.FAPIOpenIDConnect;
 import net.openid.conformance.variant.FAPIResponseMode;
-import net.openid.conformance.variant.VCI1FinalCredentialFormat;
-import net.openid.conformance.variant.VCIAuthorizationCodeFlowVariant;
-import net.openid.conformance.variant.VCICredentialEncryption;
-import net.openid.conformance.variant.VCIGrantType;
 import net.openid.conformance.variant.VariantConfigurationFields;
 import net.openid.conformance.variant.VariantHidesConfigurationFields;
 import net.openid.conformance.variant.VariantNotApplicable;
@@ -165,10 +154,6 @@ import java.util.function.Supplier;
 	FAPI2FinalOPProfile.class,
 	FAPIResponseMode.class,
 	AuthorizationRequestType.class,
-	VCIGrantType.class,
-	VCIAuthorizationCodeFlowVariant.class,
-	VCI1FinalCredentialFormat.class,
-	VCICredentialEncryption.class,
 })
 @VariantConfigurationFields(parameter = FAPI2FinalOPProfile.class, value = "plain_fapi", configurationFields = {
 	"resource.resourceMethod",
@@ -271,31 +256,6 @@ import java.util.function.Supplier;
 @VariantConfigurationFields(parameter = AuthorizationRequestType.class, value = "rar", configurationFields = {
 	"resource.richAuthorizationRequest",
 })
-// Hide VCI params for non-VCI profiles
-@VariantNotApplicableWhen(
-	parameter = VCIGrantType.class,
-	values = {"authorization_code", "pre_authorization_code"},
-	whenParameter = FAPI2FinalOPProfile.class,
-	hasValues = {"plain_fapi", "openbanking_uk", "consumerdataright_au", "openbanking_brazil", "connectid_au", "cbuae", "fapi_client_credentials_grant"}
-)
-@VariantNotApplicableWhen(
-	parameter = VCIAuthorizationCodeFlowVariant.class,
-	values = {"wallet_initiated", "issuer_initiated"},
-	whenParameter = FAPI2FinalOPProfile.class,
-	hasValues = {"plain_fapi", "openbanking_uk", "consumerdataright_au", "openbanking_brazil", "connectid_au", "cbuae", "fapi_client_credentials_grant"}
-)
-@VariantNotApplicableWhen(
-	parameter = VCI1FinalCredentialFormat.class,
-	values = {"sd_jwt_vc", "mdoc"},
-	whenParameter = FAPI2FinalOPProfile.class,
-	hasValues = {"plain_fapi", "openbanking_uk", "consumerdataright_au", "openbanking_brazil", "connectid_au", "cbuae", "fapi_client_credentials_grant"}
-)
-@VariantNotApplicableWhen(
-	parameter = VCICredentialEncryption.class,
-	values = {"plain", "encrypted"},
-	whenParameter = FAPI2FinalOPProfile.class,
-	hasValues = {"plain_fapi", "openbanking_uk", "consumerdataright_au", "openbanking_brazil", "connectid_au", "cbuae", "fapi_client_credentials_grant"}
-)
 // Hide FAPI2-only params for VCI and client_credentials_grant profiles
 @VariantNotApplicableWhen(
 	parameter = FAPIOpenIDConnect.class,
@@ -319,12 +279,6 @@ import java.util.function.Supplier;
 @VariantNotApplicableWhen(
 	parameter = AuthorizationRequestType.class,
 	values = {"rar"},
-	whenParameter = FAPI2FinalOPProfile.class,
-	hasValues = "vci_haip"
-)
-@VariantNotApplicableWhen(
-	parameter = VCIGrantType.class,
-	values = {"pre_authorization_code"},
 	whenParameter = FAPI2FinalOPProfile.class,
 	hasValues = "vci_haip"
 )
@@ -359,19 +313,6 @@ import java.util.function.Supplier;
 	"vci.client_attester_keys_jwks",
 	"vci.client_attestation_issuer"
 })
-@VariantHidesConfigurationFields(parameter = ClientAuthType.class, value = "client_attestation",
-	configurationFields = {"client.jwks"})
-// VCI grant type configuration
-@VariantConfigurationFields(parameter = VCIGrantType.class, value = "pre_authorization_code",
-	configurationFields = {"vci.static_tx_code"})
-// VCI flow variant hides
-@VariantHidesConfigurationFields(parameter = VCIAuthorizationCodeFlowVariant.class, value = "wallet_initiated",
-	configurationFields = {"vci.credential_offer_endpoint"})
-// Client attestation hides for non-attestation auth types
-@VariantHidesConfigurationFields(parameter = ClientAuthType.class, value = "private_key_jwt",
-	configurationFields = {"vci.client_attestation_issuer", "vci.client_attestation_trust_anchor"})
-@VariantHidesConfigurationFields(parameter = ClientAuthType.class, value = "mtls",
-	configurationFields = {"vci.client_attestation_issuer", "vci.client_attestation_trust_anchor"})
 public abstract class AbstractFAPI2SPFinalServerTestModule extends AbstractRedirectServerTestModule {
 
 	protected int whichClient;
@@ -469,8 +410,6 @@ public abstract class AbstractFAPI2SPFinalServerTestModule extends AbstractRedir
 		if (isRarRequest && profileBehavior.shouldExtractRARFromConfig()) {
 			callAndContinueOnFailure(RARSupport.ExtractRARFromConfig.class, Condition.ConditionResult.FAILURE);
 		}
-
-		call(profileBehavior.afterServerConfigurationFetched());
 
 		whichClient = 1;
 
@@ -1107,37 +1046,9 @@ public abstract class AbstractFAPI2SPFinalServerTestModule extends AbstractRedir
 
 		call(profileBehavior.validateResourceEndpointResponseHeaders(isSecondClient()));
 
-		profileBehavior.validateResourceEndpointResponse();
+		call(profileBehavior.validateResourceEndpointResponse());
 
 		eventLog.endBlock();
-	}
-
-	protected void validateBrazilPaymentInitiationSignedResponse() {
-		call(exec().mapKey("endpoint_response", "resource_endpoint_response_full"));
-		call(exec().mapKey("endpoint_response_jwt", "consent_endpoint_response_jwt"));
-		callAndContinueOnFailure(EnsureContentTypeApplicationJwt.class, ConditionResult.FAILURE, "BrazilOB-6.1");
-		callAndContinueOnFailure(EnsureHttpStatusCodeIs201.class, ConditionResult.FAILURE);
-
-		callAndStopOnFailure(ExtractSignedJwtFromResourceResponse.class, "BrazilOB-6.1");
-
-		callAndContinueOnFailure(FAPIBrazilValidateResourceResponseSigningAlg.class, ConditionResult.FAILURE, "BrazilOB-6.1");
-
-		callAndContinueOnFailure(FAPIBrazilValidateResourceResponseTyp.class, ConditionResult.FAILURE, "BrazilOB-6.1");
-
-		// signature needs to be validated against the organisation jwks (already fetched during pre-auth steps)
-
-		call(exec().mapKey("server", "org_server"));
-		call(exec().mapKey("server_jwks", "org_server_jwks"));
-		callAndStopOnFailure(FetchServerKeys.class);
-		call(exec().unmapKey("server"));
-		call(exec().unmapKey("server_jwks"));
-
-		callAndContinueOnFailure(ValidateResourceResponseSignature.class, ConditionResult.FAILURE, "BrazilOB-6.1");
-
-		callAndContinueOnFailure(ValidateResourceResponseJwtClaims.class, ConditionResult.FAILURE, "BrazilOB-6.1");
-
-		call(exec().unmapKey("endpoint_response"));
-		call(exec().unmapKey("endpoint_response_jwt"));
 	}
 
 	protected boolean isSecondClient() {
@@ -1158,14 +1069,6 @@ public abstract class AbstractFAPI2SPFinalServerTestModule extends AbstractRedir
 
 	Environment getEnv() {
 		return env;
-	}
-
-	void doCallAndStopOnFailure(Class<? extends Condition> conditionClass, String... requirements) {
-		callAndStopOnFailure(conditionClass, requirements);
-	}
-
-	void doCallAndContinueOnFailure(Class<? extends Condition> conditionClass, Condition.ConditionResult onFail, String... requirements) {
-		callAndContinueOnFailure(conditionClass, onFail, requirements);
 	}
 
 	protected void switchToSecondClient() {

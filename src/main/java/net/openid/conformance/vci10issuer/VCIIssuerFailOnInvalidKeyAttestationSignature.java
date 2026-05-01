@@ -2,10 +2,14 @@ package net.openid.conformance.vci10issuer;
 
 import com.google.gson.JsonObject;
 import net.openid.conformance.condition.Condition;
+import net.openid.conformance.sequence.ConditionSequence;
 import net.openid.conformance.testmodule.PublishTestModule;
+import net.openid.conformance.vci10issuer.condition.VCIGenerateKeyAttestationIfNecessary;
 import net.openid.conformance.vci10issuer.condition.VCIInvalidateKeyAttestationSignature;
 import net.openid.conformance.vci10issuer.condition.VCIValidateCredentialErrorResponse;
 import net.openid.conformance.vci10issuer.condition.VciErrorCode;
+
+import java.util.List;
 
 /**
  * Negative test that verifies the issuer properly rejects key attestations with invalid signatures.
@@ -17,14 +21,24 @@ import net.openid.conformance.vci10issuer.condition.VciErrorCode;
 @PublishTestModule(
 	testName = "oid4vci-1_0-issuer-fail-invalid-key-attestation-signature",
 	displayName = "OID4VCI 1.0: Issuer fail on invalid key attestation signature",
-	summary = "This test case checks for proper error handling when a key attestation with an invalid signature is submitted. " +
-		"The test sends a credential request with a key attestation JWT where the signature has been modified to be invalid. " +
-		"The issuer must reject this request with an invalid_proof error. " +
-		"Note: This test only runs when key attestation is required by the credential configuration. " +
-		"If key attestation is not required, the test will be skipped.",
+	summary = """
+		This test case checks for proper error handling when a key attestation with an invalid signature is submitted. \
+		The test sends a credential request with a key attestation JWT where the signature has been modified to be invalid. \
+		The issuer must reject this request with an invalid_proof error. \
+		Note: This test only runs when key attestation is required by the credential configuration. \
+		If key attestation is not required, the test will be skipped.""",
 	profile = "OID4VCI-1_0"
 )
 public class VCIIssuerFailOnInvalidKeyAttestationSignature extends AbstractVCIIssuerTestModule {
+
+	@Override
+	protected List<String> getRequiredProofTypes() {
+		// Prefer a proof_type=attestation entry when the issuer offers both, but fall back to
+		// proof_type=jwt (the start() skip logic below still enforces key_attestations_required
+		// for the jwt case, so the test only runs when key-attestation-signature validation is
+		// actually in scope).
+		return List.of("attestation", "jwt");
+	}
 
 	@Override
 	public void start() {
@@ -52,11 +66,13 @@ public class VCIIssuerFailOnInvalidKeyAttestationSignature extends AbstractVCIIs
 	}
 
 	@Override
-	protected void afterKeyAttestationGeneration() {
-		super.afterKeyAttestationGeneration();
-
-		// Invalidate the key attestation signature
-		callAndContinueOnFailure(VCIInvalidateKeyAttestationSignature.class, Condition.ConditionResult.INFO, "OID4VCI-1FINALA-D.1");
+	protected ConditionSequence makeGenerateKeyAttestationAndProofSteps() {
+		return super.makeGenerateKeyAttestationAndProofSteps()
+			.insertAfter(VCIGenerateKeyAttestationIfNecessary.class,
+				condition(VCIInvalidateKeyAttestationSignature.class)
+					.onFail(Condition.ConditionResult.INFO)
+					.requirements("OID4VCI-1FINALA-D.1")
+					.dontStopOnFailure());
 	}
 
 	@Override

@@ -109,6 +109,7 @@ import net.openid.conformance.condition.as.ValidateFAPIInteractionIdInResourceRe
 import net.openid.conformance.condition.as.ValidateRedirectUri;
 import net.openid.conformance.condition.as.ValidateRefreshToken;
 import net.openid.conformance.condition.as.ValidateRequestObjectClaims;
+import net.openid.conformance.condition.as.ValidateRequestObjectMaxAge;
 import net.openid.conformance.condition.as.ValidateRequestObjectSignature;
 import net.openid.conformance.condition.as.jarm.GenerateJARMResponseClaims;
 import net.openid.conformance.condition.as.par.CreatePAREndpointResponse;
@@ -381,7 +382,9 @@ public abstract class AbstractVCIWalletTest extends AbstractTestModule {
 
 	protected long waitTimeoutSeconds = 5;
 
-	protected long maxWaitForAdditionalRequestSeconds = 40;
+	protected long maxWaitForAdditionalRequestSeconds = 20;
+
+	protected long maxWaitForNotificationSeconds = 20;
 
 	protected VCIGrantType vciGrantType;
 
@@ -435,6 +438,10 @@ public abstract class AbstractVCIWalletTest extends AbstractTestModule {
 
 		if (config.has("maxWaitForAdditionalRequestSeconds")) {
 			maxWaitForAdditionalRequestSeconds = OIDFJSON.getLong(config.get("maxWaitForAdditionalRequestSeconds"));
+		}
+
+		if (config.has("maxWaitForNotificationSeconds")) {
+			maxWaitForNotificationSeconds = OIDFJSON.getLong(config.get("maxWaitForNotificationSeconds"));
 		}
 
 		setupPlainFapi();
@@ -748,8 +755,7 @@ public abstract class AbstractVCIWalletTest extends AbstractTestModule {
 	}
 
 	protected void configureSupportedCredentialConfigurations() {
-
-		JsonObject supportedCredentialConfigurations = getSupportedCredentialConfigurations();
+		JsonObject supportedCredentialConfigurations = getSupportedCredentialConfigurations(getTestExecutionManager().getTestId());
 		env.getObject("credential_issuer_metadata").add("credential_configurations_supported", supportedCredentialConfigurations);
 
 		JsonObject scopeToCredentialConfigsMap = new JsonObject();
@@ -771,8 +777,8 @@ public abstract class AbstractVCIWalletTest extends AbstractTestModule {
 		env.putObject("credential_configuration_id_scope_map", scopeToCredentialConfigsMap);
 	}
 
-	protected JsonObject getSupportedCredentialConfigurations() {
-		return customizeSupportedCredentials(VCICredentialConfigurations.getDefault());
+	protected JsonObject getSupportedCredentialConfigurations(String testId) {
+		return customizeSupportedCredentials(VCICredentialConfigurations.getDefault(testId));
 	}
 
 	protected JsonObject customizeSupportedCredentials(JsonObject supportedCredentials) {
@@ -843,10 +849,10 @@ public abstract class AbstractVCIWalletTest extends AbstractTestModule {
 
 
 	/**
-	 * If client2 is configured, check the client_id on the token request and switch
-	 * to the matching client config. Always resets to client1 first to handle repeated calls.
+	 * If client2 is configured, inspect the authenticated request and switch to the matching
+	 * client config. Always resets to client1 first to handle repeated calls.
 	 */
-	protected void switchToMatchingClientForTokenEndpoint() {
+	protected void switchToMatchingClientForRequest(String requestObjectKey) {
 		unmapClient();
 
 		JsonObject client2 = env.getObject("client2");
@@ -854,11 +860,11 @@ public abstract class AbstractVCIWalletTest extends AbstractTestModule {
 			return;
 		}
 
-		String requestClientId = env.getString("token_endpoint_request", "body_form_params.client_id");
+		String requestClientId = env.getString(requestObjectKey, "body_form_params.client_id");
 
 		// For client_attestation, client_id is in the attestation PoP JWT's "iss" claim
 		if (requestClientId == null && clientAuthType == ClientAuthType.CLIENT_ATTESTATION) {
-			String popHeader = env.getString("token_endpoint_request", "headers.oauth-client-attestation-pop");
+			String popHeader = env.getString(requestObjectKey, "headers.oauth-client-attestation-pop");
 			if (popHeader != null) {
 				try {
 					SignedJWT popJwt = SignedJWT.parse(popHeader);
@@ -1251,10 +1257,42 @@ public abstract class AbstractVCIWalletTest extends AbstractTestModule {
 			return new ResponseEntity<>(errorBody, HttpStatus.BAD_REQUEST);
 		}
 
+		// Extract the validated notification event and notification_id from the request body
+		// before unmapping incoming_request so the onNotificationReceived hook can inspect them.
+		String notificationEvent = env.getString("incoming_request", "body_json.event");
+		String notificationId = env.getString("incoming_request", "body_json.notification_id");
+
 		call(exec().unmapKey("incoming_request").endBlock());
 
-		setStatus(Status.WAITING);
+		// Subclasses MAY optionally complete the test early from within the hook by calling
+		// fireTestFinished (e.g. VCIWalletTestCredentialIssuanceWithNotification fast-finishes
+		// on a 'credential_accepted' notification so the tester doesn't have to wait for the
+		// grace-period timer). fireTestFinished internally transitions RUNNING → WAITING, so
+		// the handler only forces a WAITING transition here if the hook left the test in
+		// RUNNING (i.e. the default no-op path, or a hook that elected not to complete yet).
+		onNotificationReceived(notificationEvent, notificationId);
+		if (getStatus() == Status.RUNNING) {
+			setStatus(Status.WAITING);
+		}
 		return new ResponseEntity<>(HttpStatus.NO_CONTENT);
+	}
+
+	/**
+	 * Hook invoked when a valid notification has been received from the wallet at the
+	 * notification endpoint. Called only after {@link VCIValidateNotificationRequest} has
+	 * accepted the request, so {@code event} is guaranteed to be one of {@code credential_accepted},
+	 * {@code credential_failure} or {@code credential_deleted}, and {@code notificationId}
+	 * is guaranteed to match the one issued on the credential response.
+	 *
+	 * <p>The default implementation is a no-op — most tests don't gate completion on
+	 * notifications. {@code VCIWalletTestCredentialIssuanceWithNotification} overrides this
+	 * to complete the test as soon as a notification arrives.
+	 *
+	 * @param event the {@code event} claim from the notification request body
+	 * @param notificationId the {@code notification_id} claim from the notification request body
+	 */
+	protected void onNotificationReceived(String event, String notificationId) {
+		// Default: no-op
 	}
 
 	@SuppressWarnings("unused")
@@ -1403,7 +1441,14 @@ public abstract class AbstractVCIWalletTest extends AbstractTestModule {
 			callAndContinueOnFailure(CreateResourceServerDpopNonce.class, ConditionResult.INFO);
 		}
 
-		resourceEndpointCallComplete();
+		// Only signal "the credential was delivered" on HTTP 200 — a 202 on the initial credential
+		// endpoint call is just the transaction_id handoff for deferred issuance, and the wallet
+		// still has to poll the deferred endpoint for the real credential.
+		if (responseStatus == HttpStatus.OK) {
+			onCredentialSent();
+		} else {
+			logPendingCredentialDelivery(responseStatus);
+		}
 		return new ResponseEntity<>(encryptedResponse, headers, responseStatus);
 	}
 
@@ -1440,11 +1485,47 @@ public abstract class AbstractVCIWalletTest extends AbstractTestModule {
 			if (requireResourceServerEndpointDpopNonce()) {
 				callAndContinueOnFailure(CreateResourceServerDpopNonce.class, ConditionResult.INFO);
 			}
-			// at this point we can assume the test is fully done
-			resourceEndpointCallComplete();
+			// Only signal "the credential was delivered" on HTTP 200 — a 202 on the initial
+			// credential endpoint call is just the transaction_id handoff for deferred issuance,
+			// and the wallet still has to poll the deferred endpoint for the real credential.
+			if (responseStatus == HttpStatus.OK) {
+				onCredentialSent();
+			} else {
+				logPendingCredentialDelivery(responseStatus);
+			}
 			responseEntity = new ResponseEntity<>(credentialEndpointResponse, headersFromJson(headerJson), responseStatus);
 		}
 		return responseEntity;
+	}
+
+	/**
+	 * Hook invoked when the emulated issuer has successfully sent a credential to the wallet
+	 * (HTTP 200 from either the credential endpoint for immediate issuance or the deferred
+	 * credential endpoint for deferred issuance). The default implementation schedules the
+	 * test to finish after {@link #maxWaitForAdditionalRequestSeconds} to allow the wallet
+	 * to send any follow-up requests.
+	 *
+	 * <p>Test subclasses can override this hook to gate completion on additional wallet
+	 * behavior — e.g. {@code VCIWalletTestCredentialIssuanceWithNotification} waits for a
+	 * notification endpoint call before completing or skipping the test.
+	 */
+	protected void onCredentialSent() {
+		resourceEndpointCallComplete();
+	}
+
+	/**
+	 * Logged when the credential endpoint responds with anything other than HTTP 200 (e.g. a
+	 * 202 Accepted for a deferred-issuance transaction_id handoff). In this case the wallet
+	 * has not yet received the actual credential, so the test stays in WAITING and does not
+	 * schedule its finish — the subsequent {@link #deferredCredentialEndpoint} call will
+	 * complete the test when the real credential is delivered.
+	 */
+	protected void logPendingCredentialDelivery(HttpStatus responseStatus) {
+		setStatus(Status.WAITING);
+		eventLog.log(getName(),
+			"Credential endpoint responded with HTTP " + responseStatus.value() + "; the wallet "
+				+ "still needs to fetch the credential (e.g. via the deferred credential endpoint) "
+				+ "before the test can be considered complete.");
 	}
 
 	/**
@@ -1897,8 +1978,8 @@ public abstract class AbstractVCIWalletTest extends AbstractTestModule {
 			responseEntity = ResponseEntity.status(HttpStatus.OK).contentType(MediaType.APPLICATION_JSON).body(credentialIssuerMetadata);
 		}
 
-		callAndContinueOnFailure(EnsureIncomingRequestMethodIsGet.class, ConditionResult.FAILURE, "OID4VCI-1FINAL-11.2.2");
-		callAndContinueOnFailure(VCICheckIssuerMetadataRequestUrl.class, ConditionResult.FAILURE, "OID4VCI-1FINAL-11.2.2");
+		callAndContinueOnFailure(EnsureIncomingRequestMethodIsGet.class, ConditionResult.FAILURE, "OID4VCI-1FINAL-12.2.2");
+		callAndContinueOnFailure(VCICheckIssuerMetadataRequestUrl.class, ConditionResult.FAILURE, "OID4VCI-1FINAL-12.2.2");
 
 		setStatus(Status.WAITING);
 		return responseEntity;
@@ -1963,6 +2044,8 @@ public abstract class AbstractVCIWalletTest extends AbstractTestModule {
 
 	protected void authenticateParEndpointRequest(String requestId) {
 		call(exec().mapKey("token_endpoint_request", requestId));
+
+		switchToMatchingClientForRequest(requestId);
 
 		if (clientAuthType == ClientAuthType.MTLS || profileRequiresMtlsEverywhere) {
 			// there is generally no requirement to present an MTLS certificate at the PAR endpoint when using private_key_jwt.
@@ -2130,7 +2213,7 @@ public abstract class AbstractVCIWalletTest extends AbstractTestModule {
 		}
 
 		// If client2 is configured, check if the incoming request is from client2 and switch
-		switchToMatchingClientForTokenEndpoint();
+		switchToMatchingClientForRequest(requestId);
 
 		callAndStopOnFailure(CheckClientIdMatchesOnTokenRequestIfPresent.class, ConditionResult.FAILURE, "RFC6749-3.2.1");
 
@@ -2524,6 +2607,7 @@ public abstract class AbstractVCIWalletTest extends AbstractTestModule {
 		callAndStopOnFailure(FAPIValidateRequestObjectExp.class, "RFC7519-4.1.4", "FAPI2-MS-ID1-5.3.1-4");
 		callAndContinueOnFailure(FAPI1AdvancedValidateRequestObjectNBFClaim.class, ConditionResult.FAILURE, "FAPI2-MS-ID1-5.3.1-3");
 		callAndStopOnFailure(ValidateRequestObjectClaims.class);
+		callAndStopOnFailure(ValidateRequestObjectMaxAge.class, "OIDCC-13.3");
 		callAndContinueOnFailure(EnsureNumericRequestObjectClaimsAreNotNull.class, ConditionResult.WARNING, "OIDCC-13.3");
 		callAndContinueOnFailure(EnsureRequestObjectDoesNotContainRequestOrRequestUri.class, ConditionResult.FAILURE, "OIDCC-6.1");
 		callAndContinueOnFailure(EnsureRequestObjectDoesNotContainSubWithClientId.class, ConditionResult.FAILURE, "JAR-10.8");

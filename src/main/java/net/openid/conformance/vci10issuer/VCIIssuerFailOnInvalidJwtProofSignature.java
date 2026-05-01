@@ -1,10 +1,14 @@
 package net.openid.conformance.vci10issuer;
 
 import net.openid.conformance.condition.Condition;
+import net.openid.conformance.sequence.ConditionSequence;
 import net.openid.conformance.testmodule.PublishTestModule;
+import net.openid.conformance.vci10issuer.condition.VCIGenerateJwtProof;
 import net.openid.conformance.vci10issuer.condition.VCIInvalidateJwtProofSignature;
 import net.openid.conformance.vci10issuer.condition.VCIValidateCredentialErrorResponse;
 import net.openid.conformance.vci10issuer.condition.VciErrorCode;
+
+import java.util.List;
 
 /**
  * Negative test that verifies the issuer properly rejects JWT proofs with invalid signatures.
@@ -16,13 +20,19 @@ import net.openid.conformance.vci10issuer.condition.VciErrorCode;
 @PublishTestModule(
 	testName = "oid4vci-1_0-issuer-fail-invalid-jwt-proof-signature",
 	displayName = "OID4VCI 1.0: Issuer fail on invalid JWT proof signature",
-	summary = "This test case checks for proper error handling when a JWT proof with an invalid signature is submitted. " +
-		"The test sends a credential request with a JWT proof where the signature has been modified to be invalid. " +
-		"The issuer must reject this request with an invalid_proof error. " +
-		"Note: This test only applies when using jwt proof type. For attestation proof type, the test will be skipped.",
+	summary = """
+		This test case checks for proper error handling when a JWT proof with an invalid signature is submitted. \
+		The test sends a credential request with a JWT proof where the signature has been modified to be invalid. \
+		The issuer must reject this request with an invalid_proof error. \
+		Note: This test only applies when using jwt proof type. For attestation proof type, the test will be skipped.""",
 	profile = "OID4VCI-1_0"
 )
 public class VCIIssuerFailOnInvalidJwtProofSignature extends AbstractVCIIssuerTestModule {
+
+	@Override
+	protected List<String> getRequiredProofTypes() {
+		return List.of("jwt");
+	}
 
 	@Override
 	public void start() {
@@ -46,11 +56,13 @@ public class VCIIssuerFailOnInvalidJwtProofSignature extends AbstractVCIIssuerTe
 	}
 
 	@Override
-	protected void afterProofGeneration() {
-		super.afterProofGeneration();
-
-		// Invalidate the JWT proof signature
-		callAndContinueOnFailure(VCIInvalidateJwtProofSignature.class, Condition.ConditionResult.INFO, "OID4VCI-1FINAL-7.2.1");
+	protected ConditionSequence makeGenerateKeyAttestationAndProofSteps() {
+		return super.makeGenerateKeyAttestationAndProofSteps()
+			.insertAfter(VCIGenerateJwtProof.class,
+				condition(VCIInvalidateJwtProofSignature.class)
+					.onFail(Condition.ConditionResult.INFO)
+					.requirements("OID4VCI-1FINAL-7.2.1")
+					.dontStopOnFailure());
 	}
 
 	@Override
