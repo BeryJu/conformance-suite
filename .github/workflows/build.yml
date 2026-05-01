@@ -38,7 +38,7 @@ jobs:
           context: .
           push: true
           tags: |
-            ghcr.io/beryju/oidc-conformance-suite-server:v5.1.41
+            ghcr.io/beryju/oidc-conformance-suite-server:v5.1.43
           platforms: linux/amd64,linux/arm64
           cache-from: type=gha
           cache-to: type=gha,mode=max
@@ -60,7 +60,7 @@ jobs:
           context: nginx
           push: true
           tags: |
-            ghcr.io/beryju/oidc-conformance-suite-nginx:v5.1.41
+            ghcr.io/beryju/oidc-conformance-suite-nginx:v5.1.43
           platforms: linux/amd64,linux/arm64
           cache-from: type=gha
           cache-to: type=gha,mode=max
